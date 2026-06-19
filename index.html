@@ -186,7 +186,7 @@
     <div class="grid" style="margin-top:14px">
       <div class="panel">
         <h2>Capability profile</h2>
-        <p class="cap">Each spoke runs 1–5, higher is better. Workflow speed is derived from total cumulative QA time (Table 2).</p>
+        <p class="cap">Each spoke runs 1–5, higher is better. Workflow speed is derived from total cumulative QA time.</p>
         <div id="radar"></div>
       </div>
       <div class="panel">
@@ -207,12 +207,12 @@
   <!-- ESTIMATE -->
   <section class="view" id="view-estimate" role="tabpanel">
     <div class="est-head" style="grid-template-columns:1fr;max-width:420px">
-      <div class="field"><label for="eMethod">Method (loads Table 2 defaults)</label><select id="eMethod"></select></div>
+      <div class="field"><label for="eMethod">Method (loads defaults)</label><select id="eMethod"></select></div>
     </div>
     <input type="hidden" id="eSteer" value="3"/>
     <p class="cap" style="margin:2px 6px 0;color:var(--ink-soft);font-size:12.5px">
-      Every task from Table 2 is listed below. Edit the <b>minutes</b>, set how many <b>times</b> each repeats,
-      untick to drop, or use <b>+ Add task</b> at the end of any section for steps not in Table 2.
+      Every task from QA methods paper is listed below. Edit the <b>minutes</b>, set how many <b>times</b> each repeats,
+      untick to drop, or use <b>+ Add task</b> at the end of any section for steps not mentioned explicitly.
       Recurring tasks marked “×steering” reflect the three standard focus-steering settings (central, +X, +Y).</p>
     <table class="tasks" id="taskTable">
       <thead><tr><th style="width:24px"></th><th>Task</th>
@@ -224,7 +224,7 @@
         <div><span class="lbl">One-time prep + teardown</span><div class="big" id="sOnce">—</div></div>
         <div><span class="lbl">Recurring per session</span><div class="big" id="sRecur">—</div></div>
         <div><span class="lbl">First session (all-in)</span><div class="big" id="sFirst">—</div></div>
-        <button class="reset" id="eReset">Reset to Table 2</button>
+        <button class="reset" id="eReset">Reset to Default</button>
       </div>
       <div class="est-bar" id="sBar"></div>
       <p class="warnote" id="sWarn"></p>
@@ -285,16 +285,15 @@ const ROLES = {
   H:{label:"Heating-delivery verification",color:"--role-H"},
   T:{label:"Troubleshooting",color:"--role-T"},
 };
-const AXES = ["Cost-effective","In-vivo use","Field-shape","Workflow speed",
-  "Spatial res.","Quantitative","Post-processing"];
+const AXES = ["Cost-effective","Field-shape","Spatial res.","Quantitative","Post-processing","In-vivo use","Workflow speed"];
 const M = {
-  "LED matrix":       {c:"#E0A21A", s:[5.0,0,2.0,5.0,2.0,1.0,2.0],   roles:["R"]},
-  "Sensor-arrays":    {c:"#2CA25F", s:[4.0,0,2.7,3.3,2.5,4.0,4.0],   roles:["R"]},
-  "Scanning system":  {c:"#6C757D", s:[3.0,0,4.2,2.6,4.5,4.95,4.95], roles:["R","C"]},
-  "FO E-field sensor":{c:"#0E9AA7", s:[2.5,0,4.2,3.0,4.5,4.5,4.0],   roles:["C","T"]},
-  "IR camera":        {c:"#9B59B6", s:[2.0,0,3.4,1.3,3.0,2.0,1.0],   roles:["R"]},
-  "T-probes":         {c:"#E24A4A", s:[2.5,4.95,1.0,1.2,1.5,4.5,4.95],roles:["C","H"]},
-  "MRT":              {c:"#2E6FDF", s:[1.0,4.95,4.5,1.1,4.6,4.0,3.5], roles:["C","H"]},
+  "LED matrix":       {c:"#E0A21A", s:[5,2,2,1,2,0,5],   roles:["R"]},
+  "Sensor-arrays":    {c:"#2CA25F", s:[3.5,2.7,2.5,4,4,0,3.3],   roles:["R"]},
+  "Scanning system":  {c:"#6C757D", s:[3,4.2,4.5,4.5,4,0,3], roles:["R","C"]},
+  "FO E-field sensor":{c:"#0E9AA7", s:[4,4.2,4.5,4.95,4.95,0,0.5],   roles:["C","T"]},
+  "IR camera":        {c:"#9B59B6", s:[2,3.4,3,2,1,0,1.3],   roles:["R"]},
+  "T-probes":         {c:"#E24A4A", s:[2.5,1,1.5,4.5,4.95,4.95,1.2],roles:["C","H"]},
+  "MRT":              {c:"#2E6FDF", s:[0.5,4.5,4.6,4,3.5,4.95,1.1], roles:["C","H"]},
 };
 const NAMES = Object.keys(M);
 const COLS = ["LED matrix","Sensor-arrays","Scanning system","IR camera","T-probes","MRT"];
