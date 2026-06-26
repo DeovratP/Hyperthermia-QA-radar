@@ -424,8 +424,8 @@ function setPlan(p){
   document.querySelectorAll('#planToggle .role-btn').forEach(b=>
     b.setAttribute("aria-pressed",String(b.dataset.plan===p)));
   document.getElementById("planNote").textContent = (p==="nominal")
-    ? "Nominal plan: one 2D scan, equal phase & amplitude — EFS only, no EFV, no steering repeats."
-    : "3 focus-steering settings (central, +X, +Y) — EFV included.";
+    ? "Nominal plan: single 2D scan, equal phase & amplitude."
+    : "3 focus-steering settings (central, +X, +Y).";
   setRole(activeRole);   // rebuild role note + radar + timeline with the new plan
 }
 document.getElementById("planToggle").addEventListener("click",e=>{
