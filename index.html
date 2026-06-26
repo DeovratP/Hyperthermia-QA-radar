@@ -183,6 +183,11 @@
   <section class="view on" id="view-overview" role="tabpanel">
     <div class="roles" id="roles" role="group" aria-label="Functional QA role"></div>
     <p class="role-note" id="roleNote">Showing all seven modalities at full emphasis.</p>
+    <div class="roles" id="planToggle" role="group" aria-label="Steering plan" style="margin-top:2px">
+      <button class="role-btn" data-plan="nominal" aria-pressed="false">Nominal plan</button>
+      <button class="role-btn" data-plan="steer3" aria-pressed="true">3 focus-steering plan</button>
+    </div>
+    <p class="role-note" id="planNote">3 focus-steering settings (central, +X, +Y) — EFV included.</p>
     <div class="grid" style="margin-top:14px">
       <div class="panel">
         <h2>Capability profile</h2>
@@ -326,12 +331,20 @@ const hexA = (hex,a)=>{const x=hex.replace('#','');const r=parseInt(x.slice(0,2)
   g=parseInt(x.slice(2,4),16),b=parseInt(x.slice(4,6),16);return `rgba(${r},${g},${b},${a})`};
 const fmt = m=>{m=Math.round(m);const h=Math.floor(m/60),mm=m%60;return h?`${h}h ${mm}m`:`${mm}m`;};
 
-function modalityTotals(steer){
+/* ── plan state: 'steer3' (default) or 'nominal' ── */
+let activePlan = "steer3";
+function planSteer(){ return activePlan==="nominal" ? 1 : 3; }
+function planDropsEFV(){ return activePlan==="nominal"; }   // nominal = single 2D scan, EFS only
+
+const WS_AXIS = AXES.indexOf("Workflow speed");
+
+function modalityTotals(steer, dropEFV){
   const out={};
   COLS.forEach((name,ci)=>{
     let prep=0,recur=0,dis=0;
     TASKS.forEach(r=>{
       if(r.g) return; const v=r.v[ci]; if(v==null) return;
+      if(dropEFV && r.t==="EFV measurement") return;        // nominal: no volumetric scan
       let mins=v;
       if(r.steer) mins=v*steer;
       if(r.steerCool) mins=v*Math.max(0,steer-1);
@@ -340,6 +353,32 @@ function modalityTotals(steer){
     out[name]={prep,recur,dis,total:prep+recur+dis};
   });
   return out;
+}
+
+/* Workflow-speed score (1–5) from total cumulative time: shorter total → higher score.
+   Log scale anchored so the spread of the 3-steering case maps cleanly across 1–5. */
+function workflowSpeedScores(plan){
+  const steer = plan==="nominal"?1:3;
+  const dropEFV = plan==="nominal";
+  const T=modalityTotals(steer,dropEFV);
+  const totals=COLS.map(n=>T[n].total);
+  const lo=Math.min(...totals), hi=Math.max(...totals);
+  const llo=Math.log(lo), lhi=Math.log(hi);
+  const score={};
+  COLS.forEach(n=>{
+    const f=(Math.log(T[n].total)-llo)/((lhi-llo)||1); // 0 (fastest) … 1 (slowest)
+    score[n]=Math.round((5-4*f)*10)/10;                // 5 fastest … 1 slowest
+  });
+  return score;
+}
+function currentScores(name){
+  // copy base capability scores, overwrite Workflow-speed from the active plan
+  const base=M[name].s.slice();
+  if(COLS.includes(name)){
+    const ws=workflowSpeedScores(activePlan)[name];
+    if(ws!=null) base[WS_AXIS]=ws;
+  }
+  return base;
 }
 
 /* tabs */
@@ -367,14 +406,40 @@ const enabled = Object.fromEntries(NAMES.map(n=>[n,true]));
   mk("H","Heating-delivery","H",cssv("--role-H"));
   mk("T","Troubleshooting","T",cssv("--role-T"));
 })();
-function relevant(n){return activeRole==="all" || M[n].roles.includes(activeRole);}
+function relevant(n){
+  if(activeRole==="all") return true;
+  // IR camera qualifies as Routine only under the Nominal plan; under 3 focus-steering it drops out.
+  if(activeRole==="R" && n==="IR camera" && activePlan!=="nominal") return false;
+  return M[n].roles.includes(activeRole);
+}
+
+/* plan toggle: visible only under All roles + Routine */
+function updatePlanToggleVisibility(){
+  const show = (activeRole==="all" || activeRole==="R");
+  document.getElementById("planToggle").style.display = show ? "flex" : "none";
+  document.getElementById("planNote").style.display   = show ? "block" : "none";
+}
+function setPlan(p){
+  activePlan=p;
+  document.querySelectorAll('#planToggle .role-btn').forEach(b=>
+    b.setAttribute("aria-pressed",String(b.dataset.plan===p)));
+  document.getElementById("planNote").textContent = (p==="nominal")
+    ? "Nominal plan: one 2D scan, equal phase & amplitude — EFS only, no EFV, no steering repeats."
+    : "3 focus-steering settings (central, +X, +Y) — EFV included.";
+  setRole(activeRole);   // rebuild role note + radar + timeline with the new plan
+}
+document.getElementById("planToggle").addEventListener("click",e=>{
+  if(e.target.dataset.plan) setPlan(e.target.dataset.plan);
+});
+
 function setRole(r){
   activeRole=r;
-  document.querySelectorAll(".role-btn").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.role===r)));
+  document.querySelectorAll("#roles .role-btn").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.role===r)));
   const note=document.getElementById("roleNote");
   if(r==="all") note.innerHTML="Showing all seven modalities at full emphasis.";
-  else{const hits=NAMES.filter(n=>M[n].roles.includes(r));
+  else{const hits=NAMES.filter(n=>relevant(n));
     note.innerHTML=`<b>${ROLES[r].label}</b> — ${hits.join(", ")}. Others dimmed for comparison.`;}
+  updatePlanToggleVisibility();
   drawRadar(); drawTimeline();
 }
 
@@ -383,7 +448,7 @@ const closed=a=>a.concat([a[0]]); const axesClosed=closed(AXES);
 function radarTraces(){
   return NAMES.filter(n=>enabled[n]).map(n=>{
     const col=M[n].c, rel=relevant(n);
-    return {type:"scatterpolar",r:closed(M[n].s),theta:axesClosed,mode:"lines",name:n,
+    return {type:"scatterpolar",r:closed(currentScores(n)),theta:axesClosed,mode:"lines",name:n,
       line:{color:rel?col:hexA(col,0.28),width:rel?2.6:1.4,shape:"spline",smoothing:0.5},
       fill:"toself",fillcolor:rel?hexA(col,0.16):"rgba(0,0,0,0)",
       hovertemplate:`<b>${n}</b><br>%{theta}<br>Score %{r:.1f}<extra></extra>`,opacity:rel?1:0.5};
@@ -402,7 +467,7 @@ function drawRadar(){Plotly.react("radar",radarTraces(),radarLayout,{displayMode
 let isolate=null;
 function drawTimeline(){
   const host=document.getElementById("timeline");
-  const T=modalityTotals(3);
+  const T=modalityTotals(planSteer(), planDropsEFV());
   const shown=NAMES.filter(n=>enabled[n] && COLS.includes(n));
   const order=[...shown].sort((a,b)=>T[a].total-T[b].total);
   const max=Math.max(...order.map(n=>T[n].total),1);
@@ -648,6 +713,7 @@ function renderPlan(){
 }
 
 /* init */
+updatePlanToggleVisibility();
 drawRadar(); drawTimeline(); eLoad(); bLoad(); renderPlan();
 window.addEventListener("resize",()=>{Plotly.Plots.resize("radar");});
 </script>
