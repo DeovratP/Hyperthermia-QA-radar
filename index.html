@@ -267,7 +267,7 @@
       <button class="role-btn" data-plan="nominal" aria-pressed="false">Nominal plan</button>
       <button class="role-btn" data-plan="steer3" aria-pressed="true">3 focus-steering plan</button>
     </div>
-    <p class="role-note" id="planNote">3 focus-steering settings (central, +X, +Y) — EFV included.</p>
+    <p class="role-note" id="planNote">3 focus-steering settings (central, +X, +Y).</p>
     <div class="grid" style="margin-top:14px">
       <div class="panel">
         <h2>Capability profile</h2>
@@ -448,11 +448,10 @@ const M = {
 };
 const NAMES = Object.keys(M);
 const COLS = ["LED matrix","Sensor-arrays","Scanning system","IR camera","T-probes","MRT"];
-// Display-only names for the dropdowns. Keys MUST stay equal to COLS entries.
 const COL_LABEL = {
-  "LED matrix":        "LED matrix",
-  "Sensor-arrays":     "E-field Sensor-arrays",
-  "Scanning system":   "Robotic E-field-probe scanning",
+  "LED matrix":        "2D LED matrix",
+  "Sensor-arrays":     "2D E-field Sensor-arrays",
+  "Scanning system":   "Robotic E-field scanning probe",
   "IR camera":         "Infrared Thermography (IR camera)",
   "T-probes":          "Temperature-probes (T-probes)",
   "MRT":               "Magnetic Resonance Thermometry (MRT)",
@@ -474,11 +473,11 @@ const TASKS = [
   {t:"Water bolus filling",         phase:"recur", v:[15,15,15,15,15,15]},
   {t:"Equipment handling / prep",   phase:"recur", v:[1,5,5,1,30,30]},
   {t:"Calibration / zeroing",       phase:"recur", v:[1,5,5,5,5,5]},
-  {t:"Heating per measurement",     phase:"recur", v:[null,null,null,6,6,6], steer:true},
-  {t:"Cooling between measurements",phase:"recur", v:[null,null,null,480,480,480], steerCool:true},
+  {t:"Heating per measurement",     phase:"recur", v:[null,null,null,6,6,6], times:3},
+  {t:"Cooling between measurements",phase:"recur", v:[null,null,null,480,480,480], times:2},
   {t:"EFS measurement",             phase:"recur", v:[1,0.03,40,0.03,null,0.07]},
   {t:"EFV measurement",             phase:"recur", v:[null,null,210,null,null,1.4]},
-  {t:"Focus-steering measurement",  phase:"recur", v:[1,0.03,40,0.03,null,1.67], steer:true},
+  {t:"3x focus-steering measurements",  phase:"recur", v:[1,0.03,40,0.03,null,1.67]},
   {t:"Water bolus emptying",        phase:"recur", v:[5,5,5,5,5,5]},
 ];
 const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -486,23 +485,27 @@ const hexA = (hex,a)=>{const x=hex.replace('#','');const r=parseInt(x.slice(0,2)
   g=parseInt(x.slice(2,4),16),b=parseInt(x.slice(4,6),16);return `rgba(${r},${g},${b},${a})`};
 const fmt = m=>{m=Math.round(m);const h=Math.floor(m/60),mm=m%60;return h?`${h}h ${mm}m`:`${mm}m`;};
 
-/* ── plan state: 'steer3' (default) or 'nominal' ── */
 let activePlan = "steer3";
 function planSteer(){ return activePlan==="nominal" ? 1 : 3; }
-function planDropsEFV(){ return activePlan==="nominal"; }   // nominal = single 2D scan, EFS only
+function planDropsEFV(){ return activePlan==="nominal"; }
 
 const WS_AXIS = AXES.indexOf("Workflow speed");
 
 function modalityTotals(steer, dropEFV){
+  // `steer` is the active steering count (3 for the 3-steering plan, 1 for nominal).
+  // Task ×times come from the data (r.times, default 1). Under the nominal plan the two
+  // steering-dependent rows collapse to a single scan: Heating runs once, Cooling not at all.
   const out={};
+  const nominal = (steer===1);
   COLS.forEach((name,ci)=>{
     let prep=0,recur=0,dis=0;
     TASKS.forEach(r=>{
       if(r.g) return; const v=r.v[ci]; if(v==null) return;
       if(dropEFV && r.t==="EFV measurement") return;        // nominal: no volumetric scan
-      let mins=v;
-      if(r.steer) mins=v*steer;
-      if(r.steerCool) mins=v*Math.max(0,steer-1);
+      let times = r.times || 1;
+      if(nominal && r.t==="Heating per measurement") times = 1;   // one scan → heat once
+      if(nominal && r.t==="Cooling between measurements") times = 0; // one scan → no cooling interval
+      const mins=v*times;
       if(r.phase==="prep") prep+=mins; else if(r.phase==="dis") dis+=mins; else recur+=mins;
     });
     out[name]={prep,recur,dis,total:prep+recur+dis};
@@ -510,8 +513,6 @@ function modalityTotals(steer, dropEFV){
   return out;
 }
 
-/* Workflow-speed score (1–5) from total cumulative time: shorter total → higher score.
-   Log scale anchored so the spread of the 3-steering case maps cleanly across 1–5. */
 function workflowSpeedScores(plan){
   const steer = plan==="nominal"?1:3;
   const dropEFV = plan==="nominal";
@@ -521,13 +522,12 @@ function workflowSpeedScores(plan){
   const llo=Math.log(lo), lhi=Math.log(hi);
   const score={};
   COLS.forEach(n=>{
-    const f=(Math.log(T[n].total)-llo)/((lhi-llo)||1); // 0 (fastest) … 1 (slowest)
-    score[n]=Math.round((5-4*f)*10)/10;                // 5 fastest … 1 slowest
+    const f=(Math.log(T[n].total)-llo)/((lhi-llo)||1);
+    score[n]=Math.round((5-4*f)*10)/10;
   });
   return score;
 }
 function currentScores(name){
-  // copy base capability scores, overwrite Workflow-speed from the active plan
   const base=M[name].s.slice();
   if(COLS.includes(name)){
     const ws=workflowSpeedScores(activePlan)[name];
@@ -536,7 +536,6 @@ function currentScores(name){
   return base;
 }
 
-/* tabs */
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-selected",String(x===b)));
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("on"));
@@ -544,7 +543,6 @@ document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{
   if(b.dataset.view==="overview"){Plotly.Plots.resize("radar");}
 }));
 
-/* roles */
 let activeRole="all";
 const enabled = Object.fromEntries(NAMES.map(n=>[n,true]));
 (function buildRoleButtons(){
@@ -563,12 +561,10 @@ const enabled = Object.fromEntries(NAMES.map(n=>[n,true]));
 })();
 function relevant(n){
   if(activeRole==="all") return true;
-  // IR camera qualifies as Routine only under the Nominal plan; under 3 focus-steering it drops out.
   if(activeRole==="R" && n==="IR camera" && activePlan!=="nominal") return false;
   return M[n].roles.includes(activeRole);
 }
 
-/* plan toggle: visible only under All roles + Routine */
 function updatePlanToggleVisibility(){
   const show = (activeRole==="all" || activeRole==="R");
   document.getElementById("planToggle").style.display = show ? "flex" : "none";
@@ -579,9 +575,9 @@ function setPlan(p){
   document.querySelectorAll('#planToggle .role-btn').forEach(b=>
     b.setAttribute("aria-pressed",String(b.dataset.plan===p)));
   document.getElementById("planNote").textContent = (p==="nominal")
-    ? "Nominal plan: one 2D scan, equal phase & amplitude — EFS only, no EFV, no steering repeats."
-    : "3 focus-steering settings (central, +X, +Y) — EFV included.";
-  setRole(activeRole);   // rebuild role note + radar + timeline with the new plan
+    ? "Nominal plan: one 2D scan, equal phase & amplitude."
+    : "3 focus-steering settings (central, +X, +Y).";
+  setRole(activeRole);
 }
 document.getElementById("planToggle").addEventListener("click",e=>{
   if(e.target.dataset.plan) setPlan(e.target.dataset.plan);
@@ -598,7 +594,6 @@ function setRole(r){
   drawRadar(); drawTimeline();
 }
 
-/* radar */
 const closed=a=>a.concat([a[0]]); const axesClosed=closed(AXES);
 function radarTraces(){
   return NAMES.filter(n=>enabled[n]).map(n=>{
@@ -618,7 +613,6 @@ const radarLayout={margin:{l:78,r:78,t:24,b:38},paper_bgcolor:"rgba(0,0,0,0)",
       gridcolor:"rgba(0,0,0,0.08)"}},showlegend:false};
 function drawRadar(){Plotly.react("radar",radarTraces(),radarLayout,{displayModeBar:false,responsive:true});}
 
-/* timeline */
 let isolate=null;
 function drawTimeline(){
   const host=document.getElementById("timeline");
@@ -655,7 +649,6 @@ function drawTimeline(){
   });
 }
 
-/* chips */
 (function buildChips(){
   const c=document.getElementById("chips");
   NAMES.forEach(n=>{const el=document.createElement("div");
@@ -664,25 +657,20 @@ function drawTimeline(){
     c.appendChild(el);});
 })();
 
-/* ───────── shared task-state engine (used by Estimate AND Budget) ─────────
-   A state is an array of rows: {name, phase, min, times, on, steer, steerCool, applic, custom} */
 function buildState(methodName){
   const ci=COLS.indexOf(methodName);
   const rows=[];
   TASKS.forEach(r=>{
     if(r.g) return;
     const v=r.v[ci];
-    rows.push({name:r.t, phase:r.phase, min:(v==null?0:v), times:1,
-      on:v!=null, steer:!!r.steer, steerCool:!!r.steerCool, applic:v!=null, custom:false});
+    rows.push({name:r.t, phase:r.phase, min:(v==null?0:v), times:(r.times||1),
+      on:v!=null, applic:v!=null, custom:false});
   });
   return rows;
 }
-function rowMinutes(row, steer){
+function rowMinutes(row){
   if(!row.applic||!row.on) return 0;
-  let mult=row.times;
-  if(row.steer) mult*=steer;
-  if(row.steerCool) mult*=Math.max(0,steer-1);
-  return row.min*mult;
+  return row.min * (row.times||1);
 }
 function stateTotals(rows, steer){
   let prep=0,recur=0,dis=0;
@@ -690,7 +678,6 @@ function stateTotals(rows, steer){
     if(row.phase==="prep") prep+=m; else if(row.phase==="dis") dis+=m; else recur+=m;});
   return {prep,recur,dis,total:prep+recur+dis};
 }
-/* render a task table body for a given state into a tbody; calls onChange after edits */
 function renderTaskTable(tbody, rows, steer, onChange){
   tbody.innerHTML="";
   PHASES.forEach(phase=>{
@@ -700,25 +687,21 @@ function renderTaskTable(tbody, rows, steer, onChange){
       if(row.phase!==phase) return;
       const tr=document.createElement("tr");
       if(!row.applic) tr.className="task-off";
-      const steerTag = row.steer?' <span style="color:var(--ink-soft)">×steering</span>'
-                     : row.steerCool?' <span style="color:var(--ink-soft)">×(steering−1)</span>':'';
       const cTag = row.custom?'<span class="custom-tag">added</span>':'';
       const naTag = row.applic?'':' <span style="color:var(--ink-soft)">— n/a</span>';
       tr.innerHTML=`
         <td><input type="checkbox" class="ck" data-i="${idx}" ${row.on?'checked':''} ${row.applic?'':'disabled'}></td>
-        <td>${row.name}${steerTag}${cTag}${naTag}</td>
+        <td>${row.name}${cTag}${naTag}</td>
         <td class="num"><input type="number" min="0" step="0.5" data-i="${idx}" data-f="min" value="${row.min}" ${row.applic?'':'disabled'}></td>
         <td class="num"><input type="number" min="0" step="1" data-i="${idx}" data-f="times" value="${row.times}" ${row.applic?'':'disabled'}></td>
-        <td class="num subtot">${(row.applic&&row.on)?fmt(rowMinutes(row,steer)):'—'}</td>
+        <td class="num subtot">${(row.applic&&row.on)?fmt(rowMinutes(row)):'—'}</td>
         <td>${row.custom?`<button class="del-btn" data-del="${idx}" title="Remove">×</button>`:''}</td>`;
       tbody.appendChild(tr);
     });
-    // + Add task row for this phase
     const ar=document.createElement("tr"); ar.className="add-row";
     ar.innerHTML=`<td></td><td colspan="5"><button class="add-btn" data-add="${phase}">+ Add task to ${PHASE_LABEL[phase].split(' ')[0].toLowerCase()}</button></td>`;
     tbody.appendChild(ar);
   });
-  // wire events
   tbody.querySelectorAll('input.ck').forEach(c=>c.addEventListener('change',e=>{
     rows[+e.target.dataset.i].on=e.target.checked; onChange();}));
   tbody.querySelectorAll('input[type=number]').forEach(inp=>inp.addEventListener('input',e=>{
@@ -728,19 +711,14 @@ function renderTaskTable(tbody, rows, steer, onChange){
   tbody.querySelectorAll('button[data-add]').forEach(btn=>btn.addEventListener('click',e=>{
     const phase=e.target.dataset.add;
     rows.push({name:"New task", phase, min:5, times:1, on:true,
-      steer:false, steerCool:false, applic:true, custom:true});
+      applic:true, custom:true});
     onChange(true);
-    // focus the new name field
     setTimeout(()=>{const ins=tbody.querySelectorAll('input[type=text]');
       if(ins.length) ins[ins.length-1].select();},0);
   }));
-  // custom rows need an editable name — convert their name cell to an input
   tbody.querySelectorAll('tr').forEach((tr)=>{});
 }
-/* For custom rows we want an editable text name. Re-render approach: replace name cell. */
 function makeCustomNamesEditable(tbody, rows, onChange){
-  let visibleIdx=[];
-  // map rows to their displayed order is complex; simpler: re-scan inputs by data-i on min field
   tbody.querySelectorAll('input[data-f="min"]').forEach(inp=>{
     const i=+inp.dataset.i; const row=rows[i];
     if(row.custom){
@@ -755,18 +733,14 @@ function makeCustomNamesEditable(tbody, rows, onChange){
   });
 }
 
-/* ───────── QA plans (carts) ─────────
-   Tab 2 (Erasmus) uses plan[] with totals.  Tab 3 (Share) uses plan3[] with full per-task detail. */
-let plan=[];   // [{method,color,steer,totals,tasks, rows:[snapshot]}]
-let plan3=[];  // independent; same shape, rendered without totals
+let plan=[];
+let plan3=[];
 
 function rowSnapshot(rows){
-  // deep copy of the editable rows so per-task detail survives in the cart
   return rows.map(r=>({name:r.name, phase:r.phase, min:r.min, times:r.times,
-    on:r.on, steer:r.steer, steerCool:r.steerCool, applic:r.applic, custom:r.custom}));
+    on:r.on, applic:r.applic, custom:r.custom}));
 }
 
-/* Reusable builder. cfg: {sfx, plan, render, hasReset} */
 function makeBuilder(cfg){
   const sfx=cfg.sfx;
   const sel=document.getElementById("bMethod"+sfx);
@@ -802,12 +776,11 @@ function makeBuilder(cfg){
   });
   if(cfg.hasReset){
     const rb=document.getElementById("bReset"+sfx);
-    if(rb) rb.addEventListener("click",load); // reload published defaults for the current method
+    if(rb) rb.addEventListener("click",load);
   }
   load();
 }
 
-/* Tab-2 cart: methods + per-method total + breakdown bar + grand total */
 function renderPlan(){
   const sfx="";
   const list=document.getElementById("planList"+sfx);
@@ -845,7 +818,6 @@ function renderPlan(){
     `<span style="width:${100*agg.dis/grand}%;background:var(--dis)"></span>`;
 }
 
-/* Tab-3 cart: methods + their tasks (with minutes/×times), NO totals/breakdown */
 function renderPlan3(){
   const list=document.getElementById("planList3");
   const foot=document.getElementById("planFoot3");
@@ -857,7 +829,7 @@ function renderPlan3(){
   plan3.forEach((st,i)=>{
     const div=document.createElement("div"); div.className="stage";
     const rowsHtml = st.rows.filter(r=>r.applic).map(r=>{
-      const mult = r.steer?` ×${st.steer}` : r.steerCool?` ×${Math.max(0,st.steer-1)}` : (r.times>1?` ×${r.times}`:"");
+      const mult = (r.times>1)?` ×${r.times}`:"";
       const val = (r.on)? `${r.min}m${mult}` : "skipped";
       return `<div class="tk ${r.on?'':'off'}"><span>${r.name}</span><span>${val}</span></div>`;
     }).join("");
@@ -876,14 +848,10 @@ function renderPlan3(){
 document.getElementById("planClear").addEventListener("click",()=>{plan.length=0;renderPlan();});
 document.getElementById("planClear3").addEventListener("click",()=>{plan3.length=0;renderPlan3();});
 
-/* ───────── FEEDBACK tab ───────── */
-/* >>> SET THIS to your Formspree endpoint, e.g. "https://formspree.io/f/abcdwxyz" <<<
-   Until set, Submit stays disabled and shows a notice. */
-const FORMSPREE_ENDPOINT = "https://formspree.io/f/mvzjbvwo";   // Formspree form URL here
+const FORMSPREE_ENDPOINT = "https://formspree.io/f/mvzjbvwo";
 
 const $=id=>document.getElementById(id);
 
-/* Summary of a QA plan (default plan3 = Share tab) with full per-task detail. */
 function feedbackPlanSummary(src){
   src = src || plan3;
   if(!src.length) return null;
@@ -893,15 +861,14 @@ function feedbackPlanSummary(src){
       prep:st.totals.prep, recur:st.totals.recur, dis:st.totals.dis, total:st.totals.total,
       rows: st.rows.filter(r=>r.applic).map(r=>({
         name:r.name, phase:r.phase, min:r.min, times:r.times, on:r.on,
-        steer:!!r.steer, steerCool:!!r.steerCool, custom:!!r.custom,
-        effTimes: r.steer?st.steer : r.steerCool?Math.max(0,st.steer-1) : r.times,
-        effMin: r.on? rowMinutes(r, st.steer) : 0
+        custom:!!r.custom,
+        effTimes: r.times,
+        effMin: r.on? rowMinutes(r) : 0
       }))
     }))
   };
 }
 
-/* Per-task CSV block — one row per task, easiest to read in Formspree. */
 function feedbackTaskCSV(d){
   if(!d.plan) return "(no plan built)";
   const esc=v=>{v=String(v); return /[",\n]/.test(v)?`"${v.replace(/"/g,'""')}"`:v;};
@@ -926,7 +893,6 @@ function feedbackCollect(src){
   };
 }
 
-/* build preview HTML (used by modal + as data source for PDF) */
 function feedbackPreviewHTML(src){
   const d=feedbackCollect(src);
   let h="";
@@ -938,7 +904,7 @@ function feedbackPreviewHTML(src){
     if(d.name)  h+=`<div class="kv"><span>Name</span><span>${d.name}</span></div>`;
     if(d.email) h+=`<div class="kv"><span>Email</span><span>${d.email}</span></div>`;
   }
-  h+=`<h3>QA plan — per-task detail</h3>`;
+  h+=`<h3>QA plan per-task detail</h3>`;
   if(d.plan){
     d.plan.stages.forEach(s=>{
       h+=`<div style="margin:10px 0 4px;font-weight:600">${s.n}. ${s.method} <span style="color:var(--ink-soft);font-weight:400">(${s.steer} steering settings · method total ${fmt(s.total)})</span></div>`;
@@ -956,7 +922,7 @@ function feedbackPreviewHTML(src){
       h+=`</tbody></table>`;
     });
   } else {
-    h+=`<p style="color:var(--ink-soft)">No QA plan built yet — add methods above, or describe your workflow in the comment box.</p>`;
+    h+=`<p style="color:var(--ink-soft)">No QA plan built yet; add methods above, or describe your workflow in the comment box.</p>`;
   }
   if(d.comment){
     h+=`<h3>Comments</h3><div class="ct">${d.comment.replace(/</g,'&lt;')}</div>`;
@@ -964,7 +930,6 @@ function feedbackPreviewHTML(src){
   return {html:h, data:d};
 }
 
-/* open the preview modal */
 function openPreview(src){
   const {html}=feedbackPreviewHTML(src);
   $("pvBody").innerHTML=html;
@@ -972,13 +937,12 @@ function openPreview(src){
 }
 function closePreview(){ $("pvOverlay").classList.remove("on"); }
 
-/* build a plain-text version for the Formspree email + a structured field set */
 function feedbackText(d){
-  let t=`RF Hyperthermia QA — feedback\n`;
+  let t=`RF Hyperthermia QA - feedback\n`;
   t+=`Institution: ${d.institution||'-'}\n`;
   t+=`Role: ${d.role||'-'}\nName: ${d.name||'-'}\nEmail: ${d.email||'-'}\n\n`;
   if(d.plan){
-    t+=`QA PLAN — per-task detail\n`;
+    t+=`QA PLAN per-task detail\n`;
     d.plan.stages.forEach(s=>{
       t+=`  ${s.n}. ${s.method} (${s.steer} steering settings) — method total ${fmt(s.total)}\n`;
       PHASES.forEach(ph=>{
@@ -997,7 +961,6 @@ function feedbackText(d){
   return t;
 }
 
-/* PDF via jsPDF */
 function feedbackPDF(src){
   const d=feedbackPreviewHTML(src).data;
   const { jsPDF } = window.jspdf;
@@ -1012,7 +975,7 @@ function feedbackPDF(src){
   };
   const rule=()=>{ doc.setDrawColor("#e4e7ec"); doc.line(L,y,R,y); y+=12; };
 
-  line("RF Phased-Array Hyperthermia — QA feedback",16,"#1a2230",2,true);
+  line("RF Phased-Array Hyperthermia - QA feedback",16,"#1a2230",2,true);
   line("Project RADIATHE · TU Eindhoven · generated "+new Date().toISOString().slice(0,10),9,"#5b6675",10);
   rule();
   line("Respondent",11,"#1f5fae",4,true);
@@ -1021,7 +984,7 @@ function feedbackPDF(src){
   if(d.name)  line("Name: "+d.name,11,null,0);
   if(d.email) line("Email: "+d.email,11,null,0);
   y+=6; rule();
-  line("QA plan — per-task detail",11,"#1f5fae",4,true);
+  line("QA plan per-task detail",11,"#1f5fae",4,true);
   if(d.plan){
     d.plan.stages.forEach(s=>{
       line(`${s.n}. ${s.method}  (${s.steer} steering settings) — method total ${fmt(s.total)}`,11,"#1a2230",2,true);
@@ -1047,7 +1010,6 @@ function feedbackPDF(src){
   doc.save(`QA_feedback_${safe}.pdf`);
 }
 
-/* submit to Formspree (AJAX so the user stays on-page) */
 async function feedbackSubmit(){
   const status=$("fbStatus"); status.className="fb-status"; status.textContent="";
   const d=feedbackCollect();
@@ -1064,15 +1026,13 @@ async function feedbackSubmit(){
         f.append("institution",d.institution);
         f.append("role",d.role||"");
         f.append("name",d.name||"");
-        if(d.email) f.append("email",d.email);  // Formspree uses this as reply-to
+        if(d.email) f.append("email",d.email);
         f.append("comment",d.comment||"");
         if(d.plan){
           f.append("plan_methods", d.plan.stages.map(s=>s.method).join(" + "));
-          // per-method totals as their own columns
           d.plan.stages.forEach(s=>{
             f.append(`method_${s.n}_${s.method}`, `${fmt(s.total)} (${s.steer} steering settings)`);
           });
-          // FULL per-task detail as CSV (one row per task) + readable text
           f.append("qa_tasks_csv", feedbackTaskCSV(d));
         } else {
           f.append("plan_methods","(none built)");
@@ -1082,7 +1042,7 @@ async function feedbackSubmit(){
         return f;})()
     });
     if(res.ok){ status.className="fb-status ok";
-      status.textContent="Thank you — your feedback was sent successfully.";
+      status.textContent="Thank you, your feedback was sent successfully.";
       $("fbComment").value=""; $("fbConsent").checked=false;
     } else { const j=await res.json().catch(()=>({}));
       status.className="fb-status err";
@@ -1094,23 +1054,20 @@ async function feedbackSubmit(){
 
 $("fbPreview").addEventListener("click",()=>openPreview(plan3));
 $("fbPdf").addEventListener("click",()=>{ if(window.jspdf) feedbackPDF(plan3);
-  else { const s=$("fbStatus"); s.className="fb-status err"; s.textContent="PDF library didn’t load — check your connection and retry."; } });
+  else { const s=$("fbStatus"); s.className="fb-status err"; s.textContent="PDF library didn’t load, check your connection and retry."; } });
 $("fbSubmit").addEventListener("click",feedbackSubmit);
 
-/* Erasmus-tab (tab 2) preview + PDF — use that tab's own plan */
 $("planPreview").addEventListener("click",()=>openPreview(plan));
 $("planPdf").addEventListener("click",()=>{ if(window.jspdf) feedbackPDF(plan); });
 
-/* preview modal close */
 $("pvClose").addEventListener("click",closePreview);
 $("pvOverlay").addEventListener("click",e=>{ if(e.target===$("pvOverlay")) closePreview(); });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closePreview(); });
 
-/* init */
 updatePlanToggleVisibility();
 drawRadar(); drawTimeline();
-makeBuilder({sfx:"",  plan:plan,  render:renderPlan,  hasReset:true});  // Erasmus QA estimate tab
-makeBuilder({sfx:"3", plan:plan3, render:renderPlan3, hasReset:true});  // Share your QA estimate tab
+makeBuilder({sfx:"",  plan:plan,  render:renderPlan,  hasReset:true});
+makeBuilder({sfx:"3", plan:plan3, render:renderPlan3, hasReset:true});
 renderPlan(); renderPlan3();
 window.addEventListener("resize",()=>{Plotly.Plots.resize("radar");});
 </script>
